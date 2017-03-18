@@ -181,6 +181,22 @@ class SygonixBTThermostat(ClimateDevice):
         """Return the maximum temperature."""
         return 30.0
 
+
+    @property
+    def icon(self):
+        """Return the icon to use in the frontend, if any."""
+        if self._lastupdate < -10:
+            return 'mdi:bluetooth-off'
+        if self._batty is None:
+            return 'mdi:bluetooth-off'
+        if self._batty == 100:
+            return 'mdi:battery'
+        if self._batty < 10:
+            return 'mdi:battery-alert'
+        if 10 <= self._batty <= 99:
+            return 'mdi:battery-{}0'.format(int(self._batty/10))
+        return None
+
     @property
     def device_state_attributes(self):
         """Return the device specific state attributes."""
