@@ -191,8 +191,10 @@ class SygonixBTThermostat(ClimateDevice):
             return 'mdi:bluetooth-off'
         if self._batty == 100:
             return 'mdi:battery'
-        if self._batty < 10:
+        if self._batty == 0:
             return 'mdi:battery-alert'
+        if self._batty < 10:
+            return 'mdi:battery-outline'
         if 10 <= self._batty <= 99:
             return 'mdi:battery-{}0'.format(int(self._batty/10))
         return None
