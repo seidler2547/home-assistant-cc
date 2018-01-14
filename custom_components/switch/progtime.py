@@ -6,6 +6,7 @@ https://home-assistant.io/components/switch.progtime/
 """
 import logging
 import platform
+import json
 from datetime import datetime
 from random import randint
 
@@ -15,8 +16,11 @@ from homeassistant.components.switch import (SwitchDevice, PLATFORM_SCHEMA)
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.script import Script
 from homeassistant.const import (CONF_MAC, CONF_PIN, CONF_NAME)
+import homeassistant.components.mqtt as mqtt
+from homeassistant.core import callback
 
-REQUIREMENTS = ['bluepy']
+REQUIREMENTS = ['paho-mqtt']
+DEPENDENCIES = ['mqtt']
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,12 +44,11 @@ class ProgtimeSwitch(SwitchDevice):
     """Representation of a Progtime Blue switch."""
 
     def __init__(self, mac, pin, name):
-        """Initialize the WOL switch."""
+        """Initialize the switch."""
         self._name = name
-        self._mac = mac
+        self._mac = mac.lower()
         self._pin = pin
         self._state = None
-        self.update()
 
     @property
     def should_poll(self):
@@ -55,9 +58,7 @@ class ProgtimeSwitch(SwitchDevice):
     @property
     def assumed_state(self):
         """Return if the state is based on assumptions."""
-        # Progtime Blue does NOT update the handles when the manual
-        # switch button is pressed, so the state may be wrong!
-        return True
+        return False
 
     @property
     def is_on(self):
@@ -72,44 +73,47 @@ class ProgtimeSwitch(SwitchDevice):
     def turn_on(self):
         """Turn the device on."""
         self._state = True
-        self.write_state(bytes([9]))
+        self.write_state()
         self.schedule_update_ha_state()
 
     def turn_off(self):
-        """Turn the device off."""
+        """Turn the device off if an off action is present."""
         self._state = False
-        self.write_state(bytes([1]))
+        self.write_state()
         self.schedule_update_ha_state()
 
-    def update(self):
-        """Check if device is on and update the state."""
-        self.write_state(bytes([]))
+    def async_added_to_hass(self):
+        """Subscribe mqtt events.
+        This method must be run in the event loop and returns a coroutine.
+        """
+        @callback
+        def adv_received(topic, payload, qos):
+            """A new MQTT message has been received."""
+            onoff = payload[7:8]
+            if onoff == '1':
+                self._state = False
+            if onoff == '9':
+                self._state = True
+            # 01 = remote off
+            # f9 = local on
+            # e1 = local off
+            # 19 = remote on
+            self.hass.async_add_job(self.async_update_ha_state())
 
-    def write_state(self, value):
-        from bluepy.btle import Peripheral
-        device = None
-        try:
-            # connect to device
-            device = Peripheral(self._mac)
-            # send PIN code auth
-            device.writeCharacteristic(0x3c, self._pin.to_bytes(4, byteorder = 'little'), True)
-            _LOGGER.info("Auth success for {}".format(self._mac))
+        yield from mqtt.async_subscribe(self.hass, 'ble/{}/advertisement/ff'.format(self._mac), adv_received, 1)
+        #yield from mqtt.async_subscribe(self.hass, 'ble/{}/data/+'.format(self._mac), data_received, 1)
 
-            # set date+time
-            now = datetime.now()
-            device.writeCharacteristic(0x25, bytes([now.minute, now.hour, now.day, now.month, now.year - 2000]))
-
-            # handle any outstanding value updates
-            if value:
-                device.writeCharacteristic(0x35, value, True)
-                # writing something here does a "commit"
-                device.writeCharacteristic(0x3a, bytes([randint(0,255)]))
-                _LOGGER.info("Updated switch to {}".format(value[0]))
-
-            self._state = (device.readCharacteristic(0x35)[0] & 8 > 0)
-
-        except Exception as e:
-            _LOGGER.error("Exception: %s ", str(e))
-        finally:
-            if device is not None:
-                device.disconnect()
+    def write_state(self):
+        cmds = { 'tries': 5,
+                 'commands': [
+                    { 'action': 'writeCharacteristic', 'handle': 0x3c, 'value': [ int(x) for x in self._pin.to_bytes(4, byteorder = 'little') ] },
+                  ]
+               }
+        now = datetime.now()
+        cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x25, 'value': [ now.minute, now.hour, now.day, now.month, now.year - 2000 ] })
+        if self._state:
+            cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x35, 'value': [ 9 ] })
+        else:
+            cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x35, 'value': [ 1 ] })
+        cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x3a, 'value': [ randint(0,255) ] })
+        mqtt.publish(self.hass, 'ble/{}/commands'.format(self._mac), json.dumps(cmds), 1, False)
