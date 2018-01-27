@@ -56,6 +56,16 @@ ATTR_TARGET = 'target_temp'
 ATTR_BATTERY = 'battery_level'
 ATTR_WINDOW = 'window_open'
 
+UUID_DATETIME = '47e9ee01-47e9-11e4-8939-164230d1df67'
+UUID_MODE =     '47e9ee2a-47e9-11e4-8939-164230d1df67'
+UUID_TEMP =     '47e9ee2b-47e9-11e4-8939-164230d1df67'
+UUID_BATTERY =  '47e9ee2c-47e9-11e4-8939-164230d1df67'
+UUID_PIN =      '47e9ee30-47e9-11e4-8939-164230d1df67'
+UUID_MODEL =    '00002a24-0000-1000-8000-00805f9b34fb'
+UUID_FIRMWARE = '00002a26-0000-1000-8000-00805f9b34fb'
+UUID_SOFTWARE = '00002a28-0000-1000-8000-00805f9b34fb'
+UUID_MANU =     '00002a29-0000-1000-8000-00805f9b34fb'
+
 MIN_TIME_BETWEEN_UPDATES = timedelta(seconds=300)
 SCAN_INTERVAL = timedelta(seconds=300)
 
@@ -165,19 +175,19 @@ class SygonixState():
 
     def parse_data(self, handle, payload):
         data = json.loads(payload)
-        if handle == '14':
+        if handle == UUID_MODEL:
             self.model_no = bytes(data).decode('utf-8')
-        elif handle == '16':
+        elif handle == UUID_FIRMWARE:
             self.firmware_rev = bytes(data).decode('utf-8')
-        elif handle == '18':
+        elif handle == UUID_SOFTWARE:
             self.software_rev = bytes(data).decode('utf-8')
-        elif handle == '1a':
+        elif handle == UUID_MANU:
             self.manufacturer = bytes(data).decode('utf-8')
-        elif handle == '41':
+        elif handle == UUID_BATTERY:
             self.battery_level = data[0]
-        elif handle == '3d':
+        elif handle == UUID_MODE:
             self.mode_value = data[0]
-        elif handle == '3f':
+        elif handle == UUID_TEMP:
             self.temperature = float(data[0])/2
             self.target_temp = float(data[1])/2
         self.last_talked = datetime.now()
@@ -321,14 +331,19 @@ class SygonixBTThermostat(ClimateDevice):
 
         yield from mqtt.async_subscribe(self.hass, 'ble/{}/advertisement/ff'.format(self._mac), adv_received, 1)
         yield from mqtt.async_subscribe(self.hass, 'ble/{}/data/+'.format(self._mac), data_received, 1)
+        now = datetime.now()
         cmds = { 'tries': 10,
                  'commands': [
-                    { 'action': 'writeCharacteristic', 'handle': 0x47, 'value': [ 0, 0, 0, 0 ] }, # try PIN 000000 first
-                    { 'action': 'writeCharacteristic', 'handle': 0x47, 'value': [ int(x) for x in self._pin.to_bytes(4, byteorder = 'little') ] }, # send real/desired PIN
-                    { 'action': 'readCharacteristic', 'handle': 0x14 },
-                    { 'action': 'readCharacteristic', 'handle': 0x16 },
-                    { 'action': 'readCharacteristic', 'handle': 0x18 },
-                    { 'action': 'readCharacteristic', 'handle': 0x1a },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_MODEL },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_FIRMWARE },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_SOFTWARE },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_MANU },
+                    { 'action': 'writeCharacteristic', 'uuid': UUID_PIN, 'value': [ 0, 0, 0, 0 ], 'ignoreError': '1' }, # try PIN 000000 first, in case the thermostat was reset
+                    { 'action': 'writeCharacteristic', 'uuid': UUID_PIN, 'value': [ int(x) for x in self._pin.to_bytes(4, byteorder = 'little') ] }, # send real/desired PIN
+                    { 'action': 'writeCharacteristic', 'uuid': UUID_DATETIME, 'value': [ now.minute, now.hour, now.day, now.month, now.year - 2000 ] },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_MODE },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_TEMP },
+                    { 'action': 'readCharacteristic', 'uuid': UUID_BATTERY },
                   ]
                }
         mqtt.async_publish(self.hass, 'ble/{}/commands'.format(self._mac), json.dumps(cmds), 1, False)
@@ -340,25 +355,23 @@ class SygonixBTThermostat(ClimateDevice):
         # send update request
         cmds = { 'tries': 5,
                  'commands': [
-                    { 'action': 'writeCharacteristic', 'handle': 0x47, 'value': [ int(x) for x in self._pin.to_bytes(4, byteorder = 'little') ] },
+                    { 'action': 'writeCharacteristic', 'uuid': UUID_PIN, 'value': [ int(x) for x in self._pin.to_bytes(4, byteorder = 'little') ] },
                   ]
                }
         if self._current.mode_code != self._target.mode_code and self._target.manual is not None:
-            cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x3d, 'value': [ self._target.mode_value, 0, 0 ] })
+            cmds['commands'].append({ 'action': 'writeCharacteristic', 'uuid': UUID_MODE, 'value': [ self._target.mode_value, 0, 0 ] })
 
         if self._current.target_temp != self._target.target_temp and self._target.target_temp is not None:
-            cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x3f, 'value': [ 128, int(self._target.target_temp * 2), 128, 128, 128, 128, 128 ] })
+            cmds['commands'].append({ 'action': 'writeCharacteristic', 'uuid': UUID_TEMP, 'value': [ 128, int(self._target.target_temp * 2), 128, 128, 128, 128, 128 ] })
 
         if len(cmds['commands']) > 1:
-            now = datetime.now()
-            cmds['commands'].append({ 'action': 'writeCharacteristic', 'handle': 0x1d, 'value': [ now.minute, now.hour, now.day, now.month, now.year - 2000 ] })
-            cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x3d })
-            cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x3f })
-            cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x41 })
+            cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_MODE })
+            cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_TEMP })
+            cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_BATTERY })
             if self._current.model_no is None:
-                cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x14 })
-                cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x16 })
-                cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x18 })
-                cmds['commands'].append({ 'action': 'readCharacteristic', 'handle': 0x1a })
+                cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_MODEL })
+                cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_FIRMWARE })
+                cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_SOFWARE })
+                cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_MANU })
 
             mqtt.publish(self.hass, 'ble/{}/commands'.format(self._mac), json.dumps(cmds), 1, False)
