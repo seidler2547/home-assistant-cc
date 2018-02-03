@@ -371,7 +371,7 @@ class SygonixBTThermostat(ClimateDevice):
             if self._current.model_no is None:
                 cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_MODEL })
                 cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_FIRMWARE })
-                cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_SOFWARE })
+                cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_SOFTWARE })
                 cmds['commands'].append({ 'action': 'readCharacteristic', 'uuid': UUID_MANU })
 
             mqtt.publish(self.hass, 'ble/{}/commands'.format(self._mac), json.dumps(cmds), 1, False)
