@@ -188,8 +188,8 @@ class SygonixState():
         elif handle == UUID_MODE:
             self.mode_value = data[0]
         elif handle == UUID_TEMP:
-            self.temperature = float(data[0])/2
-            self.target_temp = float(data[1])/2
+            self.temperature = float(data[0])/2.0
+            self.target_temp = float(data[1])/2.0
         self.last_talked = datetime.now()
 
 class SygonixBTThermostat(ClimateDevice):
