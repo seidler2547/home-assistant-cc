@@ -19,10 +19,11 @@ import voluptuous as vol
 from homeassistant.components.climate import (
     ClimateDevice,
     PLATFORM_SCHEMA,
-    PRECISION_HALVES,
     STATE_AUTO,
     STATE_ON,
     STATE_OFF,
+    SUPPORT_TARGET_TEMPERATURE,
+    SUPPORT_OPERATION_MODE,
 )
 from homeassistant.const import (
     CONF_MAC,
@@ -30,6 +31,7 @@ from homeassistant.const import (
     CONF_PIN,
     TEMP_CELSIUS,
     CONF_DEVICES,
+    PRECISION_HALVES,
     ATTR_TEMPERATURE)
 
 from homeassistant.core import callback
@@ -224,6 +226,11 @@ class SygonixBTThermostat(ClimateDevice):
     def precision(self):
         """Return precision 0.5."""
         return PRECISION_HALVES
+
+    @property
+    def supported_features(self):
+        """Return the list of supported features."""
+        return (SUPPORT_TARGET_TEMPERATURE | SUPPORT_OPERATION_MODE);
 
     @property
     def current_temperature(self):
