@@ -316,6 +316,7 @@ class SygonixBTThermostat(ClimateDevice):
             ATTR_WINDOW:      self._current.window,
         }
 
+    @asyncio.coroutine
     def async_added_to_hass(self):
         """Subscribe mqtt events.
         This method must be run in the event loop and returns a coroutine.
