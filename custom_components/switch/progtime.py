@@ -7,6 +7,7 @@ https://home-assistant.io/components/switch.progtime/
 import logging
 import platform
 import json
+import asyncio
 from datetime import datetime
 from random import randint
 
@@ -82,6 +83,7 @@ class ProgtimeSwitch(SwitchDevice):
         self.write_state()
         self.schedule_update_ha_state()
 
+    @asyncio.coroutine
     def async_added_to_hass(self):
         """Subscribe mqtt events.
         This method must be run in the event loop and returns a coroutine.
